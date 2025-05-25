@@ -1,7 +1,7 @@
 ########Section_1##########
 import sys
 import bs4
-from bs4 import BeautifulSoup as soup
+from bs4 import BeautifulSoup as soup # type: ignore
 from urllib.request import urlopen
 import os
 import sys
