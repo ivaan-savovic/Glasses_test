@@ -1,387 +1,229 @@
-########Section_1##########
 import sys
-import bs4
-from bs4 import BeautifulSoup as soup # type: ignore
-from urllib.request import urlopen
 import os
-import sys
-from luma.core.interface.serial import i2c
-from luma.core.render import canvas
-from luma.oled.device import ssd1306, ssd1325, ssd1331, sh1106
 import time
 import datetime
+import subprocess
+from urllib.request import urlopen
+from bs4 import BeautifulSoup as soup  # type: ignore
+from luma.core.interface.serial import i2c
+from luma.core.render import canvas
+from luma.oled.device import ssd1306
 import wolframalpha
 import speech_recognition as sr
-import pyaudio
+import pyaudio  # Required by speech_recognition even if unused directly
 import wikipedia
 from picamera import PiCamera
 import dropbox
-import picamera
 from twilio.rest import Client
 
-##########Section_2###########
-contacts = {'Friend1': "718-822-2909", 'Friend2': "415-586-7272", 'Friend3': "316-316-316"}
+"""Smart Glasses Assistant
+Refactored and bug‑fixed version of the original main.py
+Compatible with Raspberry Pi + OLED (SSD1306) + BlueALSA headset.
+"""
 
-# Wolfram
-app_id = ('')  # WolfRam Alpha ID
+# ========== Configuration ==========
+contacts = {
+    "Friend1": "718-822-2909",
+    "Friend2": "415-586-7272",
+    "Friend3": "316-316-316",
+}
 
-# Dropbox
-dropbox_access_token = ""  # Unique Dropbox token
+# Environment variables keep secrets out of source code
+app_id = os.getenv("WOLFRAM_APP_ID", "")
+dropbox_access_token = os.getenv("DROPBOX_ACCESS_TOKEN", "")
+twilio_account_sid = os.getenv("TWILIO_SID", "")
+twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
 
-# Twilio
-twilio_account_sid = ''  # You will find this information in your Twilio account
-twilio_auth_token = ''
-# twilio_client = Client(twilio_account_sid, twilio_auth_token)
+twilio_client: Client | None = None
+if twilio_account_sid and twilio_auth_token:
+    twilio_client = Client(twilio_account_sid, twilio_auth_token)
 
-client = wolframalpha.Client(app_id)
-res = client.query('what is the temperature in San Fransisco')  # Replace with the name of your city
-answer = next(res.results).text
-str1 = answer
-str2 = str1.split('(', 1)[0]
+# Characters Espeak cannot pronounce cleanly
+bad_chars = [";", "|", "(", ")", "+", "=", "1"]
 
-bad_chars = [';', '|', '(', ')', '+', '=', '1']  # We use this to remove all of the characters that Espeak can't say
-
-num = ["05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55",
-       "0"]  # At these points in every hour the glasses will refresh the weather data
-
-
-#######Section_3#################
-
-def util2():
-    cdt = datetime.datetime.now()
-    min1 = str(cdt.minute)
-    hour = str(cdt.hour)
-
-    with canvas(device) as draw:
-        draw.text((0, 0), hour, fill="blue")
-        draw.text((11, 0), ":", fill="blue")
-        draw.text((15, 0), min1, fill="blue")
-        draw.text((0, 0), "___________", fill="yellow")
-        # draw.text((0, 9), date, fill = "white")
-        draw.text((33, 0), str2, fill="white")
-        # draw.text((0, 115), "...", fill = "white")
-
-
-def util3():
-    cdt = datetime.datetime.now()
-    min1 = str(cdt.minute)
-    hour = str(cdt.hour)
-
-    with canvas(device) as draw:
-        draw.text((0, 0), hour, fill="blue")
-        draw.text((11, 0), ":", fill="blue")
-        draw.text((15, 0), min1, fill="blue")
-        draw.text((0, 0), "___________", fill="yellow")
-        # draw.text((0, 9), date, fill = "white")
-        draw.text((33, 0), str2, fill="white")
-        draw.text((0, 115), "...", fill="white")
-
-
-def listen():
-    print('listening...')
-    util3()
-    # with canvas(device) as draw:
-    # draw.text((0, 115), "...", fill = "white")
-    os.system(
-        'arecord -d 4 -f cd -t wav -D bluealsa:DEV=A0:18:12:00:9D:55,PROFILE=sco test.wav')  # Replace the MAC address with that of your hedset
-
-    r = sr.Recognizer()
-    try:
-        harvard = sr.AudioFile('test.wav')
-        with harvard as source:
-            audio = r.record(source)
-        global val
-        val = r.recognize_google(audio)
-        print(val)
-    except:
-        print('sorry I couldnt understand')
-
-
-def say(statment):
-    statment1 = statment.replace(" ", "_")
-    os.system('espeak ' + str(
-        statment1) + ' -ven+f3 -k5 -s130 --stdout | aplay -D bluealsa:DEV=A0:18:12:00:9D:55,PROFILE=sco')  # Change the MAC address here as well
-
-
-def query(query):
-    client = wolframalpha.Client(app_id)
-    res = client.query(query)
-    answer = next(res.results).text
-    answer1 = answer.partition('\n')[0]
-    print(answer1)
-
-
-def start_up():
-    hour1 = int(datetime.datetime.now().hour)
-    if hour1 >= 0 and hour1 < 12:
-        # print('computer: good morning')
-        say('good_morning')
-    elif hour1 >= 12 and hour1 < 20:
-        # print('computer: good afternoon')
-        say('good_afternoon')
-    else:
-        # print('computer: good evening')
-        say('good_evening')
-    say('how may i help you')
-
-
-def send_sms(person, msg_to_text):
-    if person in contacts:
-        # say('What would you like to say')
-        # listen()
-        message = twilio_client.messages \
-            .create(
-            body=msg_to_text,
-            from_='+YourTwilioNumber',  # PUT YOUR TWILIO PHONE NUMBER HERE, sry for caps
-            status_callback='http://postb.in/1234abcd',
-            to=contacts[person]
-        )
-
-
-serial = i2c(port=1, address=0x3C)  # Put in the address of your display
+# OLED display initialisation
+serial = i2c(port=1, address=0x3C)
 device = ssd1306(serial, rotate=1)
 
-text = ("What would you like to say? ")
-text1 = ('\n'.join([text[i:i + 11] for i in range(0, len(text), 11)]))
+def say(text: str) -> None:
+    """Speak text via eSpeak → aplay (default ALSA device)"""
+    safe = text.replace(" ", "_")
+    os.system(f"espeak {safe} -ven+f3 -k5 -s130 --stdout | aplay")
 
-cdt = datetime.datetime.now()
-# date = str(cdt.day) + "/" + str(cdt.month) + "/" + str(cdt.year)
+def get_time() -> tuple[str, str]:
+    now = datetime.datetime.now()
+    return str(now.hour).zfill(2), str(now.minute).zfill(2)
 
-start_up()
-
-
-def utilitys():
-    cdt = datetime.datetime.now()
-    min1 = str(cdt.minute)
-    hour = str(cdt.hour)
-
+def draw_oled(extra: str = "") -> None:
+    """Draw clock + optional message on OLED"""
+    h, m = get_time()
     with canvas(device) as draw:
-        draw.text((0, 0), hour, fill="blue")
-        draw.text((11, 0), ":", fill="blue")
-        draw.text((15, 0), min1, fill="blue")
-        draw.text((0, 0), "___________", fill="yellow")
-        # draw.text((0, 9), date, fill = "white")
-        draw.text((33, 0), str2, fill="white")
-        if min1 in num:
-            client = wolframalpha.Client(app_id)
-            res = client.query('what is the temperature in San Fransisco')
-            answer = next(res.results).text
-            str1 = answer
-            str3 = str1.split('(', 1)[0]
-            draw.text((33, 0), str3, fill="white")
+        draw.text((0, 0), h, fill="white")
+        draw.text((11, 0), ":", fill="white")
+        draw.text((15, 0), m, fill="white")
+        if extra:
+            draw.text((0, 16), extra[:17], fill="white")  # 128x64 -> ~17 chars / line
 
+# ========== I/O helpers ==========
 
-def util(func1):
-    cdt = datetime.datetime.now()
-    min1 = str(cdt.minute)
-    hour = str(cdt.hour)
-
-    with canvas(device) as draw:
-        draw.text((0, 0), hour, fill="blue")
-        draw.text((11, 0), ":", fill="blue")
-        draw.text((15, 0), min1, fill="blue")
-        draw.text((0, 0), "___________", fill="yellow")
-        # draw.text((0, 9), date, fill = "white")
-        draw.text((33, 0), str2, fill="white")
-        draw.text((0, 64), func1, fill="white")
-
-
-def upload_img():
-    file = open('img.txt', 'r')
-    file51 = file.read()
-    file.close()
-    file45 = int(file51)
-    file45 += 1
-    global img
-    img = 'img{}.jpg'.format(file45)
-    print(img)
-
-
-def save_img():
-    file1 = open('img.txt', 'r')
-    file99 = file1.read()
-    file1.close()
-    file100 = int(file99)
-    file100 += 1
-    file2 = str(file100)
-    open('img.txt', 'w').close()
-    new_num = open('img.txt', 'w')
-    new_num.write(file2)
-    new_num.close()
-    print(file2)
-
-
-def upload_vid():
-    file3 = open('vid.txt', 'r')
-    file61 = file3.read()
-    file3.close()
-    file47 = int(file61)
-    file47 += 1
-    global vid
-    vid = 'vid{}.h264'.format(file47)
-    print(vid)
-
-
-def save_vid():
-    file3 = open('vid.txt', 'r')
-    file101 = file3.read()
-    file3.close()
-    file102 = int(file101)
-    file102 += 1
-    file7 = str(file102)
-    open('vid.txt', 'w').close()
-    new_num2 = open('vid.txt', 'w')
-    new_num2.write(file7)
-    new_num2.close()
-    print(file7)
-
-
-########Section_4#############
-
-while True:
-    utilitys()
-    listen()
+def listen(seconds: int = 4) -> str:
+    """Record audio via arecord and return Google‑ASR transcript"""
+    draw_oled("…")
+    os.system(f"arecord -d {seconds} -f cd -t wav test.wav")
+    r = sr.Recognizer()
     try:
-        if len(val) >= 2:
-            if 'news' in val:
-                news_url = "https://news.google.com/news/rss"
-                Client = urlopen(news_url)
-                xml_page = Client.read()
-                Client.close()
-                soup_page = soup(xml_page, "xml")
-                news_list = soup_page.findAll("item")
-                # Print news title, url and publish date
-                i = 0
-                util('news...')
-                for news in news_list:
-                    print(news.title.text + "\n")
-                    say(news.title.text)
-                    # print(news.link.text)
-                    # print(news.pubDate.text)
-                    # print("-"*60)
-                    i += 1
-                    time.sleep(1)
-                    if i == 3:
-                        break
-                del val
-                util("news...")
-                time.sleep(3)
+        with sr.AudioFile("test.wav") as src:
+            audio = r.record(src)
+        return r.recognize_google(audio).lower()
+    except Exception as e:
+        print("ASR error:", e)
+        return ""
 
-            if 'exit program' in val:
-                os.system('pkill -f main.py')
-                del val
+def send_sms(person: str, message: str) -> None:
+    if not twilio_client:
+        say("Twilio not configured")
+        return
+    if person not in contacts:
+        say("Contact not found")
+        return
+    twilio_client.messages.create(
+        body=message,
+        from_="+YourTwilioNumber",  # Replace with verified Twilio number
+        to=contacts[person],
+    )
 
-            if 'SMS' in val:
-                del val
-                say('who would you like to send a text to?')
-                listen()
-                dude = str(val)
-                del val
-                say('what would you like to say')
-                listen()
-                msg_to_send = str(val)
-                del val
-                send_sms(dude, msg_to_send)
-                util("SMS sent!")
-                time.sleep(3)
+# ========== External info ==========
 
-            if 'time' in val:
-                cdt1 = datetime.datetime.now()
-                h = cdt1.hour
-                m = cdt1.minute
-                print(str(h) + ':' + str(m))
-                say(str(h))
-                say(str(m))
+def query_wolfram(query: str) -> str | None:
+    if not app_id:
+        return None
+    try:
+        client = wolframalpha.Client(app_id)
+        res = client.query(query)
+        answer = next(res.results).text.split("\n", 1)[0]
+        for c in bad_chars:
+            answer = answer.replace(c, "")
+        return answer
+    except Exception:
+        return None
 
-                del val
-                util("time...")
-                time.sleep(3)
+def get_weather() -> str:
+    answer = query_wolfram("current temperature in San Francisco")
+    return answer or "Weather unavailable"
 
-            if 'picture' in val:
-                camera = PiCamera()
-                upload_img()
-                img_name = img
-                camera.start_preview()
-                time.sleep(5)
-                camera.capture(img_name)
-                camera.stop_preview()
-                save_img()
-                dropbox_path = "/SmartGlassesAPI/{}".format(
-                    img_name)  # Go to your Dropbox profile and make a folder named SmartGlassesAPI
-                computer_path = r'/home/pi/{}'.format(img_name)
-                client = dropbox.Dropbox(dropbox_access_token)
-                client.files_upload(open(computer_path, "rb").read(), dropbox_path)
-                print('image saved to dropbox account')
-                say('image save to drop box account')
-                del img
-                del val
-                util("saved...")
-                time.sleep(3)
+# ========== Camera / Dropbox ==========
 
-            if 'play my music' in val:
-                util("music...")
-                time.sleep(2)
+def _next_counter(path: str) -> int:
+    if not os.path.exists(path):
+        return 1
+    with open(path) as f:
+        return int(f.read().strip() or 0) + 1
 
-                # replace the 00:00:00:00:00:00 with the MAC address of your headset
-                os.system('aplay -D bluealsa:DEV=00:00:00:00:00:00,PROFILE=sco /home/pi/Desktop/Imagine.wav')
-                del val
-                say('would you like me to play the next song')
-                listen()
-                if 'yes' in val:  # Dang I guess I should have stored this in a variable
-                    os.system('aplay -D bluealsa:DEV=00:00:00:00:00:00,PROFILE=sco /home/pi/Desktop/BeautifulName.wav')
-                    del val
-                    say('would you like me to play the next song')
-                    listen()
-                    if 'yes' in val:  # Lol, you have to do it again
-                        os.system('aplay -D bluealsa:DEV=00:00:00:00:00:00,PROFILE=sco /home/pi/Desktop/Oceans.wav')
-                        del val
-                if 'no' in val:
-                    del val
-                    continue
+def _save_counter(path: str, value: int) -> None:
+    with open(path, "w") as f:
+        f.write(str(value))
 
-            if 'video' in val:
-                upload_vid()
-                vid_name = vid
-                # vid_name = str(vid_name)
-                with picamera.PiCamera() as camera:
-                    camera.start_recording(vid_name)
-                    time.sleep(30)
-                    camera.stop_recording()
-                    save_vid()
-                    new_vid_name = vid_name.replace('.h264', '.mp4')
-                    command = "MP4Box -add {} {}".format(vid_name, new_vid_name)
-                    subprocess.call([command], shell=True)
-                    dropbox_path = "/SmartGlassesAPI/{}".format(new_vid_name)
-                    computer_path = r'/home/pi/{}'.format(new_vid_name)
-                    client = dropbox.Dropbox(dropbox_access_token)
-                    client.files_upload(open(computer_path, "rb").read(), dropbox_path)
-                    time.sleep(3)
-                    print('video saved to dropbox account')
-                    say('video save to drop box account')
-                    del vid
-                    del val
-                    util("saved...")
-                    time.sleep(3)
+def capture_photo() -> None:
+    idx = _next_counter("img.txt")
+    filename = f"img{idx}.jpg"
+    with PiCamera() as cam:
+        cam.start_preview()
+        time.sleep(5)
+        cam.capture(filename)
+        cam.stop_preview()
+    _save_counter("img.txt", idx)
+    if dropbox_access_token:
+        dbx = dropbox.Dropbox(dropbox_access_token)
+        dbx.files_upload(open(filename, "rb").read(), f"/SmartGlassesAPI/{filename}")
+    say("image saved")
 
-                #############section_5######################
+def record_video(duration: int = 30) -> None:
+    vid_idx = _next_counter("vid.txt")
+    raw = f"vid{vid_idx}.h264"
+    mp4 = raw.replace(".h264", ".mp4")
+    with PiCamera() as cam:
+        cam.start_recording(raw)
+        time.sleep(duration)
+        cam.stop_recording()
+    _save_counter("vid.txt", vid_idx)
+    subprocess.run(["MP4Box", "-add", raw, mp4], check=False)
+    if dropbox_access_token:
+        dbx = dropbox.Dropbox(dropbox_access_token)
+        dbx.files_upload(open(mp4, "rb").read(), f"/SmartGlassesAPI/{mp4}")
+    say("video saved")
 
+# ========== Startup ==========
+
+def greet() -> None:
+    hour = datetime.datetime.now().hour
+    if hour < 12:
+        say("good morning")
+    elif hour < 20:
+        say("good afternoon")
+    else:
+        say("good evening")
+    say("how may i help you")
+
+# ========== Main ==========
+
+def main() -> None:
+    greet()
+    while True:
+        draw_oled()
+        command = listen()
+        if not command:
+            continue
+
+        if "exit" in command:
+            break
+        elif "news" in command:
             try:
-                client1 = wolframalpha.Client(app_id)
-                res1 = client1.query(val)
-                answer1 = next(res1.results).text
-                answer2 = answer1.partition('\n')[0]
-                for i in bad_chars:
-                    answer2 = answer2.replace(i, '')
-                print(answer2)
-                say(answer2)
-            except:
+                news_url = "https://news.google.com/news/rss"
+                soup_page = soup(urlopen(news_url).read(), "xml")
+                for item in soup_page.findAll("item")[:3]:
+                    say(item.title.text)
+                    time.sleep(1)
+                draw_oled("News done")
+            except Exception as e:
+                print("News error:", e)
+        elif "sms" in command:
+            say("who to send")
+            person = listen()
+            say("message")
+            msg = listen()
+            send_sms(person, msg)
+            draw_oled("SMS sent")
+        elif "time" in command:
+            h, m = get_time()
+            say(h)
+            say(m)
+            draw_oled("Time")
+        elif "weather" in command:
+            weather = get_weather()
+            say(weather)
+            draw_oled(weather)
+        elif "picture" in command:
+            capture_photo()
+            draw_oled("Photo OK")
+        elif "video" in command:
+            record_video()
+            draw_oled("Video OK")
+        else:
+            answer = query_wolfram(command)
+            if answer:
+                say(answer)
+                draw_oled(answer)
+            else:
                 try:
-                    print(wikipedia.summary(val, sentences=1))
-                    say(wikipedia.summary(val, sentences=1))
-                except:
-                    print('')
-            del val
-    except:
-        print(' ')
-        # del val
-################THE_END##########################
+                    summary = wikipedia.summary(command, sentences=1)
+                    say(summary)
+                    draw_oled(summary)
+                except Exception:
+                    say("I didn't understand that")
+                    draw_oled("Unknown cmd")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
